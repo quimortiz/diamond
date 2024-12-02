@@ -18,16 +18,42 @@ class InnerModelConfig:
     channels: List[int]
     attn_depths: List[bool]
     num_actions: Optional[int] = None
+    num_hidden_layers_action :int = 1
+
+class LongToFloat(nn.Module):
+    def forward(self, x):
+        return x.float()
 
 
 class InnerModel(nn.Module):
     def __init__(self, cfg: InnerModelConfig) -> None:
         super().__init__()
+        self.cfg = cfg
         self.noise_emb = FourierFeatures(cfg.cond_channels)
+        # self.act_emb = nn.Sequential(
+        #     nn.Embedding(cfg.num_actions, cfg.cond_channels // cfg.num_steps_conditioning),
+        #     nn.Flatten(),  # b t e -> b (t e)
+        # )
+
+        print("num actions is" , cfg.num_actions)
+        # self.act_emb = nn.Sequential(
+        #     # LongToFloat(),
+        #     nn.Linear(cfg.num_actions, cfg.cond_channels // cfg.num_steps_conditioning),
+        #     # nn.SiLU(),
+        #     # nn.Linear(cfg.cond_channels // cfg.num_steps_conditioning, cfg.cond_channels // cfg.num_steps_conditioning),
+        #     nn.Flatten(),  # b t e -> b (t e)
+        # )
+
+        ins = [ cfg.num_actions ] + [cfg.cond_channels // cfg.num_steps_conditioning] * cfg.num_hidden_layers_action 
+        outs = [cfg.cond_channels // cfg.num_steps_conditioning] * (cfg.num_hidden_layers_action + 1)
+        
         self.act_emb = nn.Sequential(
-            nn.Embedding(cfg.num_actions, cfg.cond_channels // cfg.num_steps_conditioning),
-            nn.Flatten(),  # b t e -> b (t e)
+            *[nn.Sequential(nn.Linear(ins[i], outs[i]), nn.SiLU()) for i in range(cfg.num_hidden_layers_action-1)] ,
+             nn.Linear(ins[-1], outs[-1]),
+            nn.Flatten()
         )
+
+
         self.cond_proj = nn.Sequential(
             nn.Linear(cfg.cond_channels, cfg.cond_channels),
             nn.SiLU(),
@@ -42,6 +68,11 @@ class InnerModel(nn.Module):
         nn.init.zeros_(self.conv_out.weight)
 
     def forward(self, noisy_next_obs: Tensor, c_noise: Tensor, obs: Tensor, act: Tensor) -> Tensor:
+        # (Pdb) act.shape
+        # torch.Size([32, 4])
+
+        # (Pdb) p action_embed.shape
+        # torch.Size([32, 256])
         cond = self.cond_proj(self.noise_emb(c_noise) + self.act_emb(act))
         x = self.conv_in(torch.cat((obs, noisy_next_obs), dim=1))
         x, _, _ = self.unet(x, cond)

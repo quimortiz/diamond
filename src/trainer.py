@@ -12,6 +12,8 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader
 from tqdm import tqdm, trange
 import wandb
+import torchvision
+
 
 from agent import Agent
 from coroutines.collector import make_collector, NumToCollect
@@ -273,6 +275,8 @@ class Trainer(StateDictMixin):
         min_steps = c.first_epoch.min
         steps_per_epoch = c.steps_per_epoch
         max_steps = c.first_epoch.max
+        max_steps = 100
+        min_steps = 100
         threshold_rew = c.first_epoch.threshold_rew
         assert min_steps % steps_per_epoch == 0
 
@@ -362,6 +366,32 @@ class Trainer(StateDictMixin):
 
         for i in trange(num_steps, desc=f"Training {name}", disable=self._rank > 0):
             batch = next(data_iterator).to(self._device) if data_iterator is not None else None
+            # batch
+            # (Pdb) batch.obs.shape
+            # torch.Size([32, 6, 3, 64, 64])
+
+            # lets save this to file!
+            obs = batch.obs
+
+            obs0 = obs[0]
+            fout = "/home/quim/code/diamond/tmp_orig.png"
+            traj_len_long_rollout = 6
+            torchvision.utils.save_image(
+                    obs0, fout, nrow=traj_len_long_rollout
+                )
+            
+            obs0 = obs[0]
+            # i assume it is from [-1 to 1]
+            # i want to go from 0 1
+            obs_ = (obs0 + 1.) / 2.
+            fout = "/home/quim/code/diamond/tmp_01.png"
+            traj_len_long_rollout = 6
+            torchvision.utils.save_image(
+                    obs_, fout, nrow=traj_len_long_rollout
+                )
+            #breakpoint()
+            # note: the image is in [-1,1]
+            
             loss, metrics = model(batch) if batch is not None else model()
             loss.backward()
 

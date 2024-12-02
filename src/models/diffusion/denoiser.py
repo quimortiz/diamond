@@ -110,7 +110,26 @@ class Denoiser(nn.Module):
             noisy_next_obs = self.apply_noise(next_obs, sigma, self.cfg.sigma_offset_noise)
 
             cs = self.compute_conditioners(sigma)
+
+            #(Pdb) batch.obs.max()
+            # tensor(0.5686, device='cuda:0')
+            # (Pdb) batch.obs.min()
+            # tensor(-1., device='cuda:0')
+
+            # (Pdb) batch.mask_padding
+            # tensor([[ True,  True,  True,  True,  True,  True],
+            #         [ True,  True,  True,  True,  True,  True],
+            #         [False, False, False,  True,  True,  True],
+            #         [ True,  True,  True,  True,  True,  True],
+            #         [False, False, False,  True,  True,  True],
+            #         [ True,  True,  True,  True,  True,  True],
+            #         [ True,  True,  True,  True,  True,  True],
+
+
             model_output = self.compute_model_output(noisy_next_obs, obs, act, cs)
+
+            # (Pdb) p model_output.shape
+            # torch.Size([32, 3, 64, 64])
 
             target = (next_obs - cs.c_skip * noisy_next_obs) / cs.c_out
             loss += F.mse_loss(model_output[mask], target[mask])
