@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 
 from .denoiser import Denoiser
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -18,6 +19,15 @@ class DiffusionSamplerConfig:
     s_tmin: float = 0
     s_tmax: float = float("inf")
     s_noise: float = 1
+
+
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        return cls(**config_dict)
+
 
 
 class DiffusionSampler:

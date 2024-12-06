@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..blocks import Conv3x3, FourierFeatures, GroupNorm, UNet
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -19,6 +20,16 @@ class InnerModelConfig:
     attn_depths: List[bool]
     num_actions: Optional[int] = None
     num_hidden_layers_action :int = 1
+    action_is_discrete: bool = True
+
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        return cls(**config_dict)
+
+
 
 class LongToFloat(nn.Module):
     def forward(self, x):

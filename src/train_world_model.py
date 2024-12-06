@@ -12,6 +12,8 @@ import utils
 import numpy as np
 
 
+from qutils import save_checkpoint, load_checkpoint , add_action , get_diffusion_batch
+
 import sys
 
 sys.path.append("/home/quim/code/diffusion_planning_v2/src")
@@ -21,8 +23,11 @@ import diff_utils
 import pathlib
 import matplotlib.pyplot as plt
 
+
 rand_id = diff_utils.get_unique_id()
 timestamp = diff_utils.get_time_stamp()
+
+torch.set_num_threads(4)
 
 output_dir = pathlib.Path(f"qoutput/{timestamp}_{rand_id}")
 output_dir.mkdir(parents=True, exist_ok=True)
@@ -34,13 +39,13 @@ img_dir.mkdir(parents=True, exist_ok=True)
 ckpt_dir.mkdir(parents=True, exist_ok=True)
 
 num_steps_conditioning = 2
-num_autoregressive_steps = 8
+num_autoregressive_steps = 4
 num_actions = 2
 
 act_is_vel = True
 act_is_vel_discretized = False
 
-inner_model_config = InnerModelConfig(
+inner_model_cfg = InnerModelConfig(
     img_channels=3,
     num_steps_conditioning=num_steps_conditioning,  # go to 2?
     cond_channels=256,
@@ -53,16 +58,17 @@ inner_model_config = InnerModelConfig(
     # attn_depths=[0, 0, 0],
     num_actions=num_actions,
     num_hidden_layers_action=0,
+    action_is_discrete=False,
 )
 
 
-denoiser_config = DenoiserConfig(
-    inner_model=inner_model_config,
+denoiser_cfg = DenoiserConfig(
+    inner_model=inner_model_cfg,
     sigma_data=0.5,
     sigma_offset_noise=0.3,
 )
 
-sigma_distribution_config = SigmaDistributionConfig(
+sigma_distribution_cfg = SigmaDistributionConfig(
     loc=-0.4,
     scale=1.2,
     sigma_min=2e-3,
@@ -95,11 +101,12 @@ diffusion_sampler_cfg_v2 = DiffusionSamplerConfig(
 
 
 device = torch.device("cuda:0")
+# device = torch.device("cpu")
 
-model = Denoiser(denoiser_config)
+model = Denoiser(denoiser_cfg)
 model.to(device)
 
-batch_size = 32
+batch_size = 16
 batch = Batch(
     obs=torch.rand(batch_size, 6, 3, 64, 64).to(device),
     act=torch.zeros(batch_size, 6, num_actions).to(device),
@@ -112,7 +119,7 @@ batch = Batch(
 )
 
 
-model.setup_training(sigma_distribution_config)
+model.setup_training(sigma_distribution_cfg)
 
 
 loss, metric = model(batch)
@@ -146,7 +153,7 @@ visualize_data = False
 datapath = "/home/quim/code/diffusion_planning_v2/data/pusht_more_data/traj_v3/"
 
 tgt_traj_len = num_steps_conditioning + 1 + num_autoregressive_steps
-batch_size = 16
+
 
 dataset = qdataset.DiskDatasetTrajv2(datapath, tgt_traj_len=tgt_traj_len)
 
@@ -161,40 +168,6 @@ dataset = qdataset.DiskDatasetTrajv2(datapath, tgt_traj_len=tgt_traj_len)
 #     return img_out
 
 
-def add_action(img, act, cross_size=2, color=0):
-    """
-    Adds a cross to the image at the location specified by the action.
-
-    Parameters:
-    - img (torch.Tensor): The input image tensor with shape (C, H, W).
-    - act (iterable): The action coordinates, where act[0] is y and act[1] is x.
-    - cross_size (int): The size of the cross arms extending from the center.
-    - color (int or float): The value to set for the cross pixels.
-
-    Returns:
-    - torch.Tensor: The modified image with a cross added.
-    """
-    img_out = img.clone()
-
-    # Map action coordinates from [0, 512] to [0, 64]
-    y_cord = int(act[1] / 512 * 64)
-    x_cord = int(act[0] / 512 * 64)
-
-    # Ensure coordinates are within image bounds
-    x_cord = max(0, min(x_cord, img_out.shape[2] - 1))
-    y_cord = max(0, min(y_cord, img_out.shape[1] - 1))
-
-    # Draw horizontal line of the cross
-    x_start = max(x_cord - cross_size, 0)
-    x_end = min(x_cord + cross_size + 1, img_out.shape[2])
-    img_out[:, y_cord, x_start:x_end] = color
-
-    # Draw vertical line of the cross
-    y_start = max(y_cord - cross_size, 0)
-    y_end = min(y_cord + cross_size + 1, img_out.shape[1])
-    img_out[:, y_start:y_end, x_cord] = color
-
-    return img_out
 
 
 if visualize_data:
@@ -271,56 +244,6 @@ num_steps = int(1e6)
 action_normalization = 512
 
 
-def get_diffusion_batch(batch):
-    """ """
-    vel_normalization = 0.3
-
-    batch_size = batch["observation.image"].shape[0]
-
-    image_1 = 2.0 * batch["observation.image"].to(device) - 1.0
-
-    if act_is_vel:
-        act_01 = (
-            (batch["action"] - batch["observation.state"]).to(device)
-            / action_normalization
-            / vel_normalization
-        )
-
-        # i want to discretize the input in 7 bins, 
-        # going from -vel_normalization to vel_normalization.
-        # the input has two channels, so i will end up with 7 bins for each channel.
-
-    elif act_is_vel_discretized:
-        # Compute the normalized velocity
-        act_01 = (
-            (batch["action"] - batch["observation.state"]).to(device)
-            / action_normalization
-            / vel_normalization
-        )
-
-        # Discretize the input into 7 bins ranging from -vel_normalization to vel_normalization
-        bin_width = (2 * vel_normalization) / 7  # Width of each bin
-        act_01_clamped = act_01.clamp(-vel_normalization, vel_normalization)
-        act_01_shifted = act_01_clamped + vel_normalization  # Shift to range [0, 2 * vel_normalization]
-        act_bins = torch.floor(act_01_shifted / bin_width).long()
-        act_bins = act_bins.clamp(max=6)  # Ensure bin indices are within [0, 6]
-        act_01 = act_bins  # Discretized actions
-    else:
-        act_01 = 2.0 * batch["action"].to(device) / action_normalization - 1.0
-    
-    tgt_traj_len = batch["observation.image"].shape[1]
-
-    batch = Batch(
-        obs=image_1,
-        act=act_01,
-        mask_padding=torch.ones(batch_size, tgt_traj_len, dtype=torch.long).to(device),
-        trunc=torch.zeros(batch_size, tgt_traj_len).to(device),
-        rew=torch.zeros(batch_size, tgt_traj_len).to(device),
-        end=torch.zeros(batch_size, tgt_traj_len).to(device),
-        info=[],
-        segment_ids=[],
-    )
-    return batch
 
 
 opt = utils.configure_opt(model, lr=1e-4, weight_decay=1e-2, eps=1e-8)
@@ -335,9 +258,9 @@ save_every = 400
 loss_queue = deque(maxlen=200)
 
 
-# state_dict_path = "/home/quim/code/diamond/qoutput/2024-12-02/17-25-07_4zyx5f/ckpt/state_dict_00007200.pth"
-# state_dict = torch.load(state_dict_path, weights_only=True)
-# model.load_state_dict(state_dict)
+state_dict_path = "/home/quim/code/diamond/qoutput/2024-12-02/18-31-10_ky80fb/ckpt/state_dict_00151200.pth"
+state_dict = torch.load(state_dict_path, weights_only=True)
+model.load_state_dict(state_dict)
 
 
 # state_dict_path = "/home/quim/code/diamond/qoutput/2024-11-27/11-18-25_dnx5h6/ckpt/state_dict_00016600.pth"
@@ -351,7 +274,7 @@ loss_queue = deque(maxlen=200)
 # TODO: try with action as the velocity! (dx with respect to the current one?)
 
 max_grad_norm = 1.0
-
+save_every = 1
 step = 0
 while step < num_steps:
     opt.zero_grad()
@@ -394,7 +317,7 @@ while step < num_steps:
             / batch_diffusion.obs.shape[0],
         )
 
-        # visualize the difference using matlplotlib for the first image. 
+        # visualize the difference using matlplotlib for the first image.
         # show three images
 
         # Visualize the difference using matplotlib for the first image
@@ -414,7 +337,9 @@ while step < num_steps:
         original_image = (original_image + 1) / 2
         output_image = (output_image + 1) / 2
         # For the difference image, shift the range to [0, 1] for visualization
-        difference_image = (difference_image - difference_image.min()) / (difference_image.max() - difference_image.min())
+        difference_image = (difference_image - difference_image.min()) / (
+            difference_image.max() - difference_image.min()
+        )
 
         # Clamp values to [0, 1] to avoid any artifacts
         original_image = np.clip(original_image, 0, 1)
@@ -425,21 +350,19 @@ while step < num_steps:
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
 
         axs[0].imshow(original_image)
-        axs[0].set_title('Original Image')
-        axs[0].axis('off')
+        axs[0].set_title("Original Image")
+        axs[0].axis("off")
 
         axs[1].imshow(output_image)
-        axs[1].set_title('Output Image')
-        axs[1].axis('off')
+        axs[1].set_title("Output Image")
+        axs[1].axis("off")
 
         axs[2].imshow(difference_image)
-        axs[2].set_title('Difference Image')
-        axs[2].axis('off')
+        axs[2].set_title("Difference Image")
+        axs[2].axis("off")
 
         plt.savefig("tmp_fig_diff.png")
-
-       
-
+        plt.close()
 
         out_v2 = diffusion_sampler_v2.sample(
             prev_obs=batch_diffusion.obs[:, :num_steps_conditioning],
@@ -456,7 +379,7 @@ while step < num_steps:
         x_01 = 0.5 * (x + 1)
 
         real_imgs = 0.5 * (batch_diffusion.obs[:, num_steps_conditioning] + 1)
-        real_imgs = real_imgs.maximum(
+        real_imgs = real_imgs.minimum(
             0.9 * torch.ones_like(real_imgs)
         )  # we real images a bit darker
 
@@ -521,7 +444,7 @@ while step < num_steps:
 
         all_trajs = []
         for traj_real, traj_fake in zip(traj_list_real, traj_list):
-            all_trajs.append(traj_real.maximum(0.9 * torch.ones_like(traj_real)))
+            all_trajs.append(traj_real.minimum(0.9 * torch.ones_like(traj_real)))
             all_trajs.append(traj_fake)
         traj = torch.stack(all_trajs)
 
@@ -546,3 +469,7 @@ while step < num_steps:
 
         fout = ckpt_dir / f"state_dict_{step:08d}.pth"
         torch.save(model.state_dict(), fout)
+
+        fout = ckpt_dir / f"ckpt_{step:08d}.pth"
+        save_checkpoint(model, opt, scheduler, step, fout, denoiser_cfg, diffusion_sampler_cfg , sigma_distribution_cfg)
+

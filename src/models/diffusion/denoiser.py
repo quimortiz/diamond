@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from data import Batch
 from .inner_model import InnerModel, InnerModelConfig
 from utils import LossAndLogs
+from dataclasses import asdict, dataclass
 
 
 def add_dims(input: Tensor, n: int) -> Tensor:
@@ -30,12 +31,33 @@ class SigmaDistributionConfig:
     sigma_min: float
     sigma_max: float
 
+    def to_dict(self):
+        return asdict(self)
+    @classmethod
+    def from_dict(cls, config_dict):
+        return cls(**config_dict)
+
 
 @dataclass
 class DenoiserConfig:
     inner_model: InnerModelConfig
     sigma_data: float
     sigma_offset_noise: float
+
+    def to_dict(self):
+        data = asdict(self)
+        data['inner_model'] = self.inner_model.to_dict()
+        return data
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        inner_model_config = InnerModelConfig.from_dict(config_dict['inner_model'])
+        return cls(
+            inner_model=inner_model_config,
+            sigma_data=config_dict['sigma_data'],
+            sigma_offset_noise=config_dict['sigma_offset_noise']
+        )
+
 
 
 class Denoiser(nn.Module):
