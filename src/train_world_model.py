@@ -151,20 +151,19 @@ def main(cfg: DictConfig):
 
     visualize_data = False
 
-    data_ids = [
-        "2024-12-06__16-33-06",
-        "2024-12-06__19-11-22",
-        "2024-12-08__13-00-39",
-        "2024-12-06__19-39-10",
-        "2024-12-08__12-33-54",
-    ]
+    if cfg.data.dt == "0.2":
+        diamond_folder = "diamond_dt2"
+    elif cfg.data.dt == "0.1":
+        diamond_folder = "diamond"
+
+    data_ids = cfg.data.data_ids
 
     tgt_traj_len = num_steps_conditioning + 1 + num_autoregressive_steps
 
     dataset = ConcatDataset(
         [
             qdataset.DiskDatasetTrajv2(
-                f"/home/quim/code/diamond/data/real_robot_pusht_v0/data_t_v0/{data_id}/diamond/",
+                f"/home/quim/code/diamond/data/real_robot_pusht_v0/data_t_v0/{data_id}/{diamond_folder}/",
                 tgt_traj_len=tgt_traj_len,
             )
             for data_id in data_ids
@@ -176,7 +175,7 @@ def main(cfg: DictConfig):
     dataset_longtraj = ConcatDataset(
         [
             qdataset.DiskDatasetTrajv2(
-                f"/home/quim/code/diamond/data/real_robot_pusht_v0/data_t_v0/{data_id}/diamond/",
+                f"/home/quim/code/diamond/data/real_robot_pusht_v0/data_t_v0/{data_id}/{diamond_folder}/",
                 tgt_traj_len=64,
             )
             for data_id in data_ids
@@ -198,19 +197,24 @@ def main(cfg: DictConfig):
 
     num_steps = int(1e6)
 
+
+
+
+    # path = repo_base /   "qoutput/2024-12-08/18-54-06_8ctpfr/ckpt/state_dict_00067200.pth"
+
+    # path = "/home/quim/code/diamond/qoutput/2024-12-08/21-29-57_kpwxkd/ckpt/state_dict_best.pth"
+    # model.load_state_dict(torch.load(path,weights_only=True))
+
+
     opt = utils.configure_opt(model, lr=1e-4, weight_decay=1e-2, eps=1e-8)
     num_warmup_steps = 1000
     scheduler = utils.get_lr_sched(opt, num_warmup_steps=num_warmup_steps)
 
-    evaluate_every = 400
-    save_every = 400
+    evaluate_every = 1000
+    save_every = 1000
 
     loss_queue = deque(maxlen=1000)
-    path = repo_base /   "qoutput/2024-12-08/18-54-06_8ctpfr/ckpt/ckpt_00067200.pth"
-
-    D = load_checkpoint(path, device)
-    model = D["model"]
-
+   
     # NOTE: this is looking well
     # Checkpoint saved at step 104000 to qoutput/2024-12-08/11-56-23_6w5ru1/ckpt/ckpt_00104000.pth
     # Step 104400 Loss 0.0008428849202755373
@@ -289,7 +293,7 @@ def main(cfg: DictConfig):
         loss, metric = model(batch_diffusion)
         loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(
+        torch.nn.utils.clip_grad_norm_(
             model.parameters(), max_norm=max_grad_norm
         )
 
