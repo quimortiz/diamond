@@ -2,10 +2,13 @@ import torch
 from dataclasses import asdict, dataclass
 from typing import List, Tuple
 from torch import Tensor
-from models.diffusion import Denoiser, DenoiserConfig, SigmaDistributionConfig
-from models.diffusion.inner_model import InnerModelConfig
-from models.diffusion import Denoiser, DiffusionSampler, DiffusionSamplerConfig
-from data import Batch
+
+
+
+from .models.diffusion import Denoiser, DenoiserConfig, SigmaDistributionConfig
+from .models.diffusion.inner_model import InnerModelConfig
+from .models.diffusion import Denoiser, DiffusionSampler, DiffusionSamplerConfig
+from .data import Batch
 
 
 

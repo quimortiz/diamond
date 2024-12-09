@@ -6,9 +6,11 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
-from data import Batch
+
+
+from ...data import Batch
 from .inner_model import InnerModel, InnerModelConfig
-from utils import LossAndLogs
+from ...utils import LossAndLogs
 from dataclasses import asdict, dataclass
 
 
