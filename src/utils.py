@@ -131,12 +131,18 @@ def configure_opt(model: nn.Module, lr: float, weight_decay: float, eps: float, 
     # separate out all parameters to those that will and won't experience regularizing weight decay
     decay = set()
     no_decay = set()
-    whitelist_weight_modules = (nn.Linear, nn.Conv1d, nn.Conv2d, nn.LSTMCell, nn.LSTM)
+    no_grad = set()
+    whitelist_weight_modules = (nn.Linear, nn.Conv1d, nn.Conv2d, nn.LSTMCell, nn.LSTM, nn.ConvTranspose1d)
     blacklist_weight_modules = (nn.LayerNorm, nn.Embedding, nn.GroupNorm)
     for mn, m in model.named_modules():
+        if m.requires_grad_ == False:
+            continue
         for pn, p in m.named_parameters():
             fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
-            if any([fpn.startswith(module_name) for module_name in blacklist_module_names]):
+            if p.requires_grad == False:
+                print("adding %s to no_grad" % fpn)
+                no_grad.add(fpn)
+            elif any([fpn.startswith(module_name) for module_name in blacklist_module_names]):
                 no_decay.add(fpn)
             elif "bias" in pn:
                 # all biases will not be decayed
@@ -151,7 +157,7 @@ def configure_opt(model: nn.Module, lr: float, weight_decay: float, eps: float, 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}
     inter_params = decay & no_decay
-    union_params = decay | no_decay
+    union_params = decay | no_decay | no_grad
     assert len(inter_params) == 0, f"parameters {str(inter_params)} made it into both decay/no_decay sets!"
     assert (
         len(param_dict.keys() - union_params) == 0
